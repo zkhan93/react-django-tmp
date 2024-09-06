@@ -4,8 +4,10 @@ from django.middleware import csrf
 from rest_framework import exceptions as rest_exceptions, response, decorators as rest_decorators, permissions as rest_permissions
 from rest_framework_simplejwt import tokens, views as jwt_views, serializers as jwt_serializers, exceptions as jwt_exceptions
 from user import serializers, models
+import requests
+import logging
 
-
+logger = logging.getLogger(__name__)
 def get_user_tokens(user):
     refresh = tokens.RefreshToken.for_user(user)
     return {
@@ -127,4 +129,23 @@ def user(request):
         return response.Response(status_code=404)
 
     serializer = serializers.UserSerializer(user)
+    return response.Response(serializer.data)
+
+@rest_decorators.api_view(["GET"])
+@rest_decorators.permission_classes([rest_permissions.IsAuthenticated])
+def ethereum(request):
+    try:
+        user = models.User.objects.get(id=request.user.id)
+    except models.User.DoesNotExist:
+        return response.Response(status_code=404)
+    
+    try:
+        res = requests.get("https://api.etherscan.io/api?module=account&action=balance&address={}&tag=latest&apikey={}".format(user.ethereum_address, settings.ETHERSCAN_API_KEY))
+        result = res.json()["result"]
+    except Exception:
+        logger.exception("failed to get balance")
+        data = {"address": user.ethereum_address, "balance": None, "error": "failed to get balance", "success": False}
+    else:
+        data = {"address": user.ethereum_address, "balance": result, "error": None, "success": True}
+    serializer = serializers.EthereumStatusSerializer(data)
     return response.Response(serializer.data)
